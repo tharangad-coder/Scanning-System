@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Stock Count & Barcode System - Z005.xlsx</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    .touch-target { min-height: 48px; min-width: 48px; }
+    .scan-flash { animation: flash-bg 0.3s ease-out; }
+    @keyframes flash-bg { 0% { background-color: rgba(16, 185, 129, 0.3); } 100% { background-color: transparent; } }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+
+  <!-- Header -->
+  <header class="bg-slate-800 border-b border-slate-700 px-4 py-3 sticky top-0 z-30 flex items-center justify-between shadow-lg">
+    <div class="flex items-center gap-3">
+      <div class="p-2 bg-blue-600 rounded-lg"><i data-lucide="barcode" class="w-6 h-6 text-white"></i></div>
+      <div>
+        <h1 class="text-base font-bold leading-tight">Vadako Stock Counter</h1>
+        <p class="text-xs text-slate-400" id="header-operator">EPF: Not set</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button onclick="openOperatorModal()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-semibold flex items-center gap-1.5 border border-slate-600">
+        <i data-lucide="user" class="w-3.5 h-3.5 text-blue-400"></i> <span id="op-btn-label">EPF / Profile</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 p-3 md:p-6 max-w-5xl mx-auto w-full flex flex-col gap-4">
+
+    <!-- TOP SECTION: Upload Excel Stock File -->
+    <div class="bg-slate-800 rounded-xl p-4 border border-blue-500/40 shadow-md">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-bold text-white flex items-center gap-2">
+            <i data-lucide="file-up" class="w-4 h-4 text-blue-400"></i> Load Available Stock Master Sheet
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5" id="file-status-desc">Preloaded with Z005.xlsx format (Auto-extracts 2-digit Qty prefix e.g., 01, 05, 10).</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-xs cursor-pointer flex items-center gap-2 shadow-lg touch-target">
+            <i data-lucide="upload" class="w-4 h-4"></i> Upload Excel File (.xlsx / .csv)
+            <input type="file" id="excel-file-input" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleExcelUpload(event)">
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Hardware Scanning Input Panel -->
+    <div class="bg-slate-800 rounded-xl p-4 border border-slate-700 shadow-md">
+      <div class="flex items-center justify-between mb-2">
+        <label for="barcode-input" class="text-xs font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
+          <i data-lucide="scan" class="w-4 h-4"></i> Hardware Scanner Input (Vadako Trigger)
+        </label>
+        <span class="inline-flex items-center gap-1 text-[11px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-medium">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span> Auto-Focus Active
+        </span>
+      </div>
+
+      <div class="flex gap-2">
+        <div class="relative flex-1">
+          <input type="text" id="barcode-input" placeholder="Scan Barcode (e.g. 05PE048104)..." 
+            class="w-full bg-slate-900 border-2 border-blue-500 rounded-lg px-4 py-3 text-lg font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-blue-400 uppercase text-white placeholder-slate-500"
+            autocomplete="off" autofocus />
+          <button onclick="clearInput()" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+        <button onclick="processScanInput()" class="px-5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg flex items-center gap-2 touch-target shadow-lg">
+          <i data-lucide="plus-circle" class="w-5 h-5"></i> Count
+        </button>
+        <button onclick="toggleCameraScanner()" class="px-3 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg flex items-center justify-center touch-target border border-slate-600" title="Camera Scan Fallback">
+          <i data-lucide="camera" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="flex items-center justify-between mt-2 text-xs text-slate-400">
+        <span>Logic: <strong class="text-blue-300">First 2 digits = Qty (01=1, 05=5, 10=10)</strong></span>
+        <span id="last-scanned-time" class="italic">Ready for scanning</span>
+      </div>
+    </div>
+
+    <!-- Camera Scanner Container (Hidden by default) -->
+    <div id="camera-container" class="hidden bg-slate-800 rounded-xl p-4 border border-blue-500/50 flex-col items-center gap-3">
+      <div class="flex justify-between w-full items-center">
+        <span class="text-sm font-semibold flex items-center gap-2"><i data-lucide="camera" class="w-4 h-4 text-blue-400"></i> Camera Barcode Scanner</span>
+        <button onclick="toggleCameraScanner()" class="text-slate-400 hover:text-white text-xs px-2 py-1 bg-slate-700 rounded">Close</button>
+      </div>
+      <div id="reader" class="w-full max-w-sm rounded-lg overflow-hidden border border-slate-700"></div>
+    </div>
+
+    <!-- Summary Metrics Dashboard -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
+        <p class="text-xs text-slate-400">Master Catalog</p>
+        <p id="stat-catalog" class="text-xl font-bold text-white mt-1">234 Parts</p>
+        <p class="text-[10px] text-blue-400 mt-0.5" id="stat-catalog-sub">Loaded from Z005.xlsx</p>
+      </div>
+      <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
+        <p class="text-xs text-slate-400">Total Counted</p>
+        <p id="stat-counted" class="text-xl font-bold text-emerald-400 mt-1">0</p>
+        <p class="text-[10px] text-slate-400 mt-0.5">Units scanned</p>
+      </div>
+      <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
+        <p class="text-xs text-slate-400">Matched Parts</p>
+        <p id="stat-matched" class="text-xl font-bold text-emerald-400 mt-1">0 / 234</p>
+        <p class="text-[10px] text-emerald-400 mt-0.5">Exact matches</p>
+      </div>
+      <div class="bg-slate-800 p-3 rounded-xl border border-slate-700">
+        <p class="text-xs text-slate-400">Variances</p>
+        <p id="stat-variance" class="text-xl font-bold text-amber-400 mt-1">0</p>
+        <p class="text-[10px] text-amber-400 mt-0.5">Discrepancy items</p>
+      </div>
+    </div>
+
+    <!-- Actions Bar -->
+    <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-800/60 p-3 rounded-xl border border-slate-700">
+      <button onclick="resetCounts()" class="px-3 py-2 bg-slate-700 hover:bg-red-900/50 hover:text-red-300 rounded-lg text-xs font-semibold border border-slate-600 flex items-center gap-1.5 text-slate-300">
+        <i data-lucide="rotate-ccw" class="w-4 h-4"></i> Reset Counts
+      </button>
+
+      <button onclick="exportToExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs flex items-center gap-2 shadow-lg ml-auto">
+        <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Export Audit Report (.xlsx)
+      </button>
+    </div>
+
+    <!-- Cleaned Stock Verification Table -->
+    <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-xl flex-1 flex flex-col">
+      <div class="p-3 bg-slate-800/80 border-b border-slate-700 flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-sm font-bold flex items-center gap-2">
+          <i data-lucide="list" class="w-4 h-4 text-blue-400"></i> Stock Verification List
+        </h2>
+        <div class="flex items-center gap-2">
+          <input type="text" id="table-search" placeholder="Filter Part..." onkeyup="renderTable()" 
+            class="bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-blue-500 w-36 md:w-48">
+          <select id="filter-status" onchange="renderTable()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none">
+            <option value="all">All Items</option>
+            <option value="counted">Scanned Only</option>
+            <option value="discrepancy">Variances Only</option>
+            <option value="unlisted">Unlisted Parts</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto flex-1 max-h-[480px] overflow-y-auto">
+        <table class="w-full text-left text-sm text-slate-300">
+          <thead class="bg-slate-900/80 text-xs text-slate-400 uppercase tracking-wider sticky top-0 z-10 border-b border-slate-700">
+            <tr>
+              <th class="py-2.5 px-4">Part Code</th>
+              <th class="py-2.5 px-4 text-center">On Hand (Expected)</th>
+              <th class="py-2.5 px-4 text-center">Counted</th>
+              <th class="py-2.5 px-4 text-center">Variance</th>
+              <th class="py-2.5 px-4 text-center">Status</th>
+            </tr>
+          </thead>
+          <tbody id="inventory-tbody" class="divide-y divide-slate-700/50 font-mono text-xs">
+            <!-- Table rows populated dynamically -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- EPF / Operator Modal -->
+  <div id="operator-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 max-w-md w-full shadow-2xl">
+      <h2 class="text-lg font-bold text-white mb-1 flex items-center gap-2">
+        <i data-lucide="user-check" class="w-5 h-5 text-blue-400"></i> Operator Details
+      </h2>
+      <p class="text-xs text-slate-400 mb-4">Please enter your EPF Number and Name to tag all stock counts.</p>
+      
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">EPF Number *</label>
+          <input type="text" id="modal-epf" placeholder="e.g., EPF1042" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-blue-500 uppercase">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Operator Name *</label>
+          <input type="text" id="modal-name" placeholder="e.g., K. A. Perera" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-blue-500">
+        </div>
+      </div>
+
+      <div class="mt-6 flex justify-end gap-2">
+        <button onclick="saveOperatorDetails()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-sm shadow-lg">
+          Save & Start Stock Count
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Embedded initial catalog from Z005.xlsx
+    const INITIAL_Z005_DATA = [
+      {"part":"PE044709","expected":1},{"part":"PE046003","expected":8},{"part":"PE046004","expected":9},{"part":"PE046102","expected":343},
+      {"part":"PE046103","expected":450},{"part":"PE046107","expected":130},{"part":"PE046108","expected":146},{"part":"PE046407","expected":1},
+      {"part":"PE046902","expected":1},{"part":"PE046904","expected":1},{"part":"PE046907","expected":12},{"part":"PE047002","expected":80},
+      {"part":"PE047006","expected":28},{"part":"PE047007","expected":22},{"part":"PE047008","expected":21},{"part":"PE047009","expected":6},
+      {"part":"PE047101","expected":49},{"part":"PE047103","expected":46},{"part":"PE047104","expected":51},{"part":"PE047107","expected":3},
+      {"part":"PE047108","expected":14},{"part":"PE047201","expected":28},{"part":"PE047202","expected":8},{"part":"PE047203","expected":11},
+      {"part":"PE047210","expected":100},{"part":"PE047303","expected":2},{"part":"PE047308","expected":2},{"part":"PE047402","expected":23},
+      {"part":"PE047404","expected":2},{"part":"PE047405","expected":18},{"part":"PE047407","expected":10},{"part":"PE047409","expected":2},
+      {"part":"PE047502","expected":1},{"part":"PE047504","expected":15},{"part":"PE047508","expected":1},{"part":"PE047602","expected":18},
+      {"part":"PE047608","expected":2},{"part":"PE047702","expected":10},{"part":"PE047704","expected":15},{"part":"PE047802","expected":2},
+      {"part":"PE047805","expected":4},{"part":"PE047808","expected":2},{"part":"PE048308","expected":287},{"part":"PE048404","expected":175},
+      {"part":"PE048405","expected":1},{"part":"PE048406","expected":2},{"part":"PE048407","expected":3},{"part":"PE048408","expected":35},
+      {"part":"PE048409","expected":2},{"part":"PE048502","expected":131},{"part":"PE048503","expected":32},{"part":"PE048504","expected":89},
+      {"part":"PE048505","expected":12},{"part":"PE048506","expected":180},{"part":"PE048508","expected":62},{"part":"PE048509","expected":222},
+      {"part":"PE048601","expected":141},{"part":"PE048602","expected":20},{"part":"PE048603","expected":54},{"part":"PE048605","expected":107},
+      {"part":"PE048606","expected":117},{"part":"PE048705","expected":13},{"part":"PE048706","expected":2},{"part":"PE048707","expected":7},
+      {"part":"PE048708","expected":43},{"part":"PE048709","expected":55},{"part":"PE048801","expected":102},{"part":"PE048802","expected":102},
+      {"part":"PE048803","expected":71},{"part":"PE048804","expected":52},{"part":"PE048805","expected":17},{"part":"PE048806","expected":143},
+      {"part":"PE048808","expected":210},{"part":"PE048809","expected":101},{"part":"PE048901","expected":181},{"part":"PE048902","expected":76},
+      {"part":"PE048903","expected":140},{"part":"PE048904","expected":47},{"part":"PE048905","expected":310},{"part":"PE048906","expected":412},
+      {"part":"PE048907","expected":305},{"part":"PE048908","expected":121},{"part":"PE048909","expected":33},{"part":"PE049001","expected":285},
+      {"part":"PE049002","expected":789},{"part":"PE049003","expected":272},{"part":"PE049004","expected":399},{"part":"PE049005","expected":469},
+      {"part":"PE049006","expected":289},{"part":"PE049007","expected":702},{"part":"PE049008","expected":268},{"part":"PE049009","expected":125},
+      {"part":"PE049101","expected":200},{"part":"PE049102","expected":492},{"part":"PE049103","expected":284},{"part":"PE049104","expected":37},
+      {"part":"PE049105","expected":235},{"part":"PE049106","expected":166},{"part":"PE049107","expected":128},{"part":"PE049108","expected":103},
+      {"part":"PE049109","expected":6},{"part":"PE049404","expected":5},{"part":"PE049405","expected":4},{"part":"PE049406","expected":13},
+      {"part":"PE049407","expected":8},{"part":"PE049408","expected":3},{"part":"PE049501","expected":28},{"part":"PE049502","expected":12},
+      {"part":"PE049503","expected":3},{"part":"PE049505","expected":48},{"part":"PE049508","expected":28},{"part":"PE049509","expected":21},
+      {"part":"PE049601","expected":72},{"part":"PE049602","expected":31},{"part":"PE049603","expected":50},{"part":"PE049604","expected":16},
+      {"part":"PE049605","expected":6},{"part":"PE049606","expected":18},{"part":"PE049607","expected":23},{"part":"PE049608","expected":18},
+      {"part":"PE049609","expected":30},{"part":"PE049701","expected":12},{"part":"PE049702","expected":22},{"part":"PE049703","expected":10},
+      {"part":"PE049705","expected":8},{"part":"PE050105","expected":573},{"part":"PE050106","expected":201},{"part":"PE050107","expected":207},
+      {"part":"PE050108","expected":117},{"part":"PE050109","expected":320},{"part":"PE050201","expected":49},{"part":"PE050202","expected":108},
+      {"part":"PE050203","expected":340},{"part":"PE050204","expected":298},{"part":"PE050205","expected":171},{"part":"PE050206","expected":383},
+      {"part":"PE050207","expected":208},{"part":"PE050208","expected":165},{"part":"PE050209","expected":324},{"part":"PE050301","expected":186},
+      {"part":"PE050302","expected":426},{"part":"PE050303","expected":122},{"part":"PE050304","expected":124},{"part":"PE050305","expected":368},
+      {"part":"PE050306","expected":289},{"part":"PE050307","expected":289},{"part":"PE050308","expected":274},{"part":"PE050309","expected":190},
+      {"part":"PE050401","expected":325},{"part":"PE050402","expected":185},{"part":"PE050403","expected":361},{"part":"PE050404","expected":304},
+      {"part":"PE050405","expected":272},{"part":"PE050406","expected":278},{"part":"PE050407","expected":323},{"part":"PE050408","expected":181},
+      {"part":"PE050409","expected":129},{"part":"PE050501","expected":192},{"part":"PE050502","expected":110},{"part":"PE050503","expected":142},
+      {"part":"PE050504","expected":308},{"part":"PE050505","expected":244},{"part":"PE050506","expected":211},{"part":"PE050507","expected":210},
+      {"part":"PE050508","expected":204},{"part":"PE050509","expected":108},{"part":"PE050601","expected":131},{"part":"PE050602","expected":144},
+      {"part":"PE050603","expected":110},{"part":"PE050604","expected":134},{"part":"PE050605","expected":135},{"part":"PE050606","expected":132},
+      {"part":"PE050607","expected":120},{"part":"PE050608","expected":113},{"part":"PE050609","expected":90},{"part":"PE050701","expected":117},
+      {"part":"PE050702","expected":132},{"part":"PE050703","expected":124},{"part":"PE050704","expected":126},{"part":"PE050705","expected":113},
+      {"part":"PE050706","expected":112},{"part":"PE050707","expected":122},{"part":"PE050708","expected":114},{"part":"PE050709","expected":122},
+      {"part":"PE050801","expected":107},{"part":"PE050802","expected":111},{"part":"PE050803","expected":104},{"part":"PE050804","expected":122},
+      {"part":"PE050805","expected":113},{"part":"PE050806","expected":118},{"part":"PE050807","expected":122},{"part":"PE050808","expected":113},
+      {"part":"PE050809","expected":123},{"part":"PE050901","expected":117},{"part":"PE050902","expected":125},{"part":"PE050903","expected":117},
+      {"part":"PE050904","expected":115},{"part":"PE050905","expected":118},{"part":"PE050906","expected":122},{"part":"PE050907","expected":113},
+      {"part":"PE050908","expected":113},{"part":"PE050909","expected":111},{"part":"PE051001","expected":121},{"part":"PE051002","expected":122},
+      {"part":"PE051003","expected":114},{"part":"PE051004","expected":112},{"part":"PE051005","expected":119},{"part":"PE051006","expected":117},
+      {"part":"PE051007","expected":113},{"part":"PE051008","expected":118},{"part":"PE051009","expected":113},{"part":"PE051101","expected":112},
+      {"part":"PE051102","expected":112},{"part":"PE051103","expected":113},{"part":"PE051104","expected":112},{"part":"PE051105","expected":111},
+      {"part":"PE051106","expected":113},{"part":"PE051107","expected":112},{"part":"PE051108","expected":113},{"part":"PE051109","expected":112}
+    ];
+
+    let inventoryState = {};
+    let operatorEPF = localStorage.getItem('vadako_epf') || '';
+    let operatorName = localStorage.getItem('vadako_name') || '';
+    let html5QrCode = null;
+
+    // Parse Barcode: Extracts first 2 digits as Qty, rest as Part Code
+    function parseBarcode(rawInput) {
+      const clean = rawInput.trim().toUpperCase();
+      if (!clean) return { part: '', qty: 1 };
+
+      // Check if first 2 digits are numeric (e.g., 01, 05, 10)
+      const prefixDigits = clean.substring(0, 2);
+      if (/^\d{2}$/.test(prefixDigits)) {
+        const qty = parseInt(prefixDigits, 10);
+        const part = clean.substring(2);
+        return { part: part, qty: qty > 0 ? qty : 1 };
+      }
+
+      // Fallback: If no 2-digit prefix, default quantity to 1
+      return { part: clean, qty: 1 };
+    }
+
+    function playBeep(type = 'success') {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        if (type === 'success') {
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          gain.gain.setValueAtTime(0.2, ctx.currentTime);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.1);
+        } else if (type === 'warning') {
+          osc.frequency.setValueAtTime(440, ctx.currentTime);
+          gain.gain.setValueAtTime(0.3, ctx.currentTime);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.2);
+        }
+      } catch (e) {}
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      loadInitialCatalog();
+      updateOperatorUI();
+
+      if (!operatorEPF || !operatorName) {
+        openOperatorModal();
+      }
+
+      const inputEl = document.getElementById('barcode-input');
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          processScanInput();
+        }
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!['INPUT', 'SELECT', 'BUTTON', 'A'].includes(e.target.tagName)) {
+          refocusScanner();
+        }
+      });
+    });
+
+    function refocusScanner() {
+      const inputEl = document.getElementById('barcode-input');
+      if (inputEl && document.activeElement !== inputEl) {
+        inputEl.focus();
+      }
+    }
+
+    function loadInitialCatalog() {
+      inventoryState = {};
+      INITIAL_Z005_DATA.forEach(item => {
+        inventoryState[item.part] = {
+          part: item.part,
+          expected: item.expected,
+          counted: 0
+        };
+      });
+      renderTable();
+      updateDashboardStats();
+    }
+
+    function processScanInput() {
+      const inputEl = document.getElementById('barcode-input');
+      const rawVal = inputEl.value;
+      if (!rawVal.trim()) return;
+
+      if (!operatorEPF) {
+        alert('Please enter your EPF number before scanning.');
+        openOperatorModal();
+        return;
+      }
+
+      const { part, qty } = parseBarcode(rawVal);
+
+      if (inventoryState[part]) {
+        inventoryState[part].counted += qty;
+        playBeep('success');
+      } else {
+        // Unlisted SKU added dynamically
+        inventoryState[part] = {
+          part: part,
+          expected: 0,
+          counted: qty,
+          unlisted: true
+        };
+        playBeep('warning');
+      }
+
+      document.body.classList.add('scan-flash');
+      setTimeout(() => document.body.classList.remove('scan-flash'), 300);
+
+      document.getElementById('last-scanned-time').innerText = `Last Scanned: ${part} (+${qty}) at ${new Date().toLocaleTimeString()}`;
+      inputEl.value = '';
+      refocusScanner();
+      renderTable();
+      updateDashboardStats();
+    }
+
+    function updateDashboardStats() {
+      const items = Object.values(inventoryState);
+      const catalogCount = items.filter(i => !i.unlisted).length;
+      const totalCounted = items.reduce((acc, curr) => acc + curr.counted, 0);
+      const matched = items.filter(i => i.counted === i.expected && i.expected > 0).length;
+      const variances = items.filter(i => i.counted !== i.expected).length;
+
+      document.getElementById('stat-catalog').innerText = `${catalogCount} Parts`;
+      document.getElementById('stat-counted').innerText = totalCounted;
+      document.getElementById('stat-matched').innerText = `${matched} / ${catalogCount}`;
+      document.getElementById('stat-variance').innerText = variances;
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('inventory-tbody');
+      const searchQuery = document.getElementById('table-search').value.trim().toUpperCase();
+      const filterStatus = document.getElementById('filter-status').value;
+
+      tbody.innerHTML = '';
+
+      let items = Object.values(inventoryState);
+
+      if (searchQuery) {
+        items = items.filter(i => i.part.includes(searchQuery));
+      }
+
+      if (filterStatus === 'counted') {
+        items = items.filter(i => i.counted > 0);
+      } else if (filterStatus === 'discrepancy') {
+        items = items.filter(i => i.counted !== i.expected);
+      } else if (filterStatus === 'unlisted') {
+        items = items.filter(i => i.unlisted);
+      }
+
+      if (items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-slate-500 italic">No parts match filter criteria</td></tr>`;
+        return;
+      }
+
+      items.forEach(item => {
+        const variance = item.counted - item.expected;
+        let statusBadge = '';
+
+        if (item.unlisted) {
+          statusBadge = `<span class="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded font-semibold">UNLISTED</span>`;
+        } else if (variance === 0) {
+          statusBadge = `<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-semibold">MATCHED</span>`;
+        } else if (variance < 0) {
+          statusBadge = `<span class="bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded font-semibold">SHORTAGE (${variance})</span>`;
+        } else {
+          statusBadge = `<span class="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-semibold">SURPLUS (+${variance})</span>`;
+        }
+
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-700/30 transition-colors";
+        tr.innerHTML = `
+          <td class="py-2.5 px-4 font-bold text-white">${item.part}</td>
+          <td class="py-2.5 px-4 text-center text-slate-400">${item.expected}</td>
+          <td class="py-2.5 px-4 text-center font-bold text-blue-400">
+            <input type="number" min="0" value="${item.counted}" onchange="updateCountManual('${item.part}', this.value)" 
+              class="w-20 bg-slate-900 border border-slate-700 rounded text-center py-1 text-white focus:outline-none focus:border-blue-500 font-mono">
+          </td>
+          <td class="py-2.5 px-4 text-center font-bold ${variance === 0 ? 'text-slate-400' : variance < 0 ? 'text-rose-400' : 'text-amber-400'}">
+            ${variance > 0 ? '+' + variance : variance}
+          </td>
+          <td class="py-2.5 px-4 text-center text-[10px]">${statusBadge}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function updateCountManual(part, val) {
+      const num = parseInt(val) || 0;
+      if (inventoryState[part]) {
+        inventoryState[part].counted = Math.max(0, num);
+        renderTable();
+        updateDashboardStats();
+      }
+    }
+
+    function clearInput() {
+      document.getElementById('barcode-input').value = '';
+      refocusScanner();
+    }
+
+    function resetCounts() {
+      if (confirm('Are you sure you want to reset all counted values to 0?')) {
+        Object.keys(inventoryState).forEach(part => {
+          inventoryState[part].counted = 0;
+        });
+        renderTable();
+        updateDashboardStats();
+      }
+    }
+
+    function openOperatorModal() {
+      document.getElementById('modal-epf').value = operatorEPF;
+      document.getElementById('modal-name').value = operatorName;
+      document.getElementById('operator-modal').classList.remove('hidden');
+    }
+
+    function saveOperatorDetails() {
+      const epf = document.getElementById('modal-epf').value.trim().toUpperCase();
+      const name = document.getElementById('modal-name').value.trim();
+
+      if (!epf || !name) {
+        alert('Please fill in both EPF Number and Operator Name.');
+        return;
+      }
+
+      operatorEPF = epf;
+      operatorName = name;
+      localStorage.setItem('vadako_epf', epf);
+      localStorage.setItem('vadako_name', name);
+
+      updateOperatorUI();
+      document.getElementById('operator-modal').classList.add('hidden');
+      refocusScanner();
+    }
+
+    function updateOperatorUI() {
+      document.getElementById('header-operator').innerText = operatorEPF ? `EPF: ${operatorEPF} | ${operatorName}` : 'EPF: Not set';
+      document.getElementById('op-btn-label').innerText = operatorEPF ? `${operatorEPF}` : 'EPF / Profile';
+    }
+
+    function toggleCameraScanner() {
+      const container = document.getElementById('camera-container');
+      if (container.classList.contains('hidden')) {
+        container.classList.remove('hidden');
+        html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 150 } },
+          (decodedText) => {
+            document.getElementById('barcode-input').value = decodedText;
+            processScanInput();
+          },
+          (errorMessage) => {}
+        ).catch(err => alert("Camera permission error: " + err));
+      } else {
+        container.classList.add('hidden');
+        if (html5QrCode) {
+          html5QrCode.stop().then(() => html5QrCode.clear());
+        }
+      }
+    }
+
+    function handleExcelUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        if (jsonData.length === 0) {
+          alert('Uploaded Excel sheet is empty!');
+          return;
+        }
+
+        inventoryState = {};
+        jsonData.forEach(row => {
+          const partKey = Object.keys(row).find(k => k.toLowerCase() === 'part' || k.toLowerCase().includes('part'));
+          const qtyKey = Object.keys(row).find(k => k.toLowerCase().includes('hand') || k.toLowerCase().includes('qty') || k.toLowerCase().includes('expected'));
+
+          const part = partKey ? String(row[partKey]).trim().toUpperCase() : String(Object.values(row)[0]).trim().toUpperCase();
+          const expected = qtyKey ? parseInt(row[qtyKey]) || 0 : parseInt(Object.values(row)[1]) || 0;
+
+          if (part) {
+            inventoryState[part] = { part, expected, counted: 0 };
+          }
+        });
+
+        renderTable();
+        updateDashboardStats();
+        document.getElementById('file-status-desc').innerText = `Active File: ${file.name} (${Object.keys(inventoryState).length} parts loaded)`;
+        document.getElementById('stat-catalog-sub').innerText = `Loaded from ${file.name}`;
+        alert(`Successfully imported ${Object.keys(inventoryState).length} parts from ${file.name}.`);
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function exportToExcel() {
+      const exportData = Object.values(inventoryState).map(item => {
+        const variance = item.counted - item.expected;
+        let status = 'MATCHED';
+        if (item.unlisted) status = 'UNLISTED';
+        else if (variance < 0) status = 'SHORTAGE';
+        else if (variance > 0) status = 'SURPLUS';
+
+        return {
+          'EPF Number': operatorEPF,
+          'Operator Name': operatorName,
+          'Part Code': item.part,
+          'On Hand Qty (Expected)': item.expected,
+          'Counted Qty': item.counted,
+          'Variance': variance,
+          'Status': status,
+          'Scan Date': new Date().toLocaleDateString(),
+          'Scan Time': new Date().toLocaleTimeString()
+        };
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Stock Count Audit");
+
+      const fileName = `Stock_Count_${operatorEPF || 'AUDIT'}_${new Date().toISOString().slice(0,10)}.xlsx`;
+      XLSX.writeFile(workbook, fileName);
+    }
+  </script>
+</body>
+</html>
